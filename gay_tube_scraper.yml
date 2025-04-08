@@ -1,0 +1,17 @@
+name: GayTubeScraper
+sceneByURL:
+  - action: script
+    url:
+      - fxggxt.com
+      - likegay.net
+      - hutgay.com
+    script:
+      - python
+      - gay_tube_scraper.py
+      - scrapeURL
+sceneByFragment:
+  action: script
+  script:
+    - python
+    - gay_tube_scraper.py
+    - scrapeFragment
