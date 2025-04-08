@@ -1,376 +1,113 @@
-#!/usr/bin/env python3
-import json
-import sys
-import re
-import requests
-from bs4 import BeautifulSoup
-import urllib.parse
+# Gay Tube Scraper for StashApp
 
-# Constants
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
-HEADERS = {
-    "User-Agent": USER_AGENT
-}
+This is a custom scraper for StashApp that works with the following gay tube sites:
+- fxggxt.com
+- likegay.net
+- hutgay.com
 
-# Helper functions
-def debug_print(message):
-    """Print debug messages to stderr"""
-    sys.stderr.write(f"{message}\n")
-    sys.stderr.flush()
+## Features
 
-def read_json_input():
-    """Read JSON input from stdin"""
-    input_data = sys.stdin.read()
-    return json.loads(input_data)
+- Scrapes scene information including title, performers, and studio
+- Works with both URL matching and filename matching
+- Handles various filename formats
+- Extracts structured data when available (JSON-LD)
+- Fallback to HTML parsing when structured data is not available
+- Supports tags extraction when available
 
-def clean_text(text):
-    """Clean and normalize text"""
-    if not text:
-        return ""
-    # Replace HTML entities and normalize whitespace
-    text = re.sub(r'&amp;', '&', text)
-    text = re.sub(r'&nbsp;', ' ', text)
-    text = re.sub(r'&#8211;', '-', text)
-    text = re.sub(r'&#8217;', "'", text)
-    text = re.sub(r'&#038;', '&', text)
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text
+## Installation
 
-def extract_performers_from_title(title):
-    """Extract performer names from title"""
-    # Common patterns:
-    # "Studio - Performer1 & Performer2 - Scene Name"
-    # "Performer1, Performer2 – Scene Name"
-    
-    performers = []
-    
-    # Try to extract from patterns with " - " or " – "
-    if " - " in title or " – " in title:
-        separator = " - " if " - " in title else " – "
-        parts = title.split(separator)
-        
-        # Check if first part contains performers
-        if "&" in parts[0] or "," in parts[0]:
-            performer_part = parts[0]
-            if "&" in performer_part:
-                performers = [p.strip() for p in performer_part.split("&")]
-            elif "," in performer_part:
-                performers = [p.strip() for p in performer_part.split(",")]
-    
-    # Clean performer names
-    performers = [clean_text(p) for p in performers if p.strip()]
-    return performers
+### Method 1: Manual Installation
 
-def extract_scene_name_from_title(title):
-    """Extract scene name from title"""
-    # Common patterns:
-    # "Studio - Performer1 & Performer2 - Scene Name"
-    # "Performer1, Performer2 – Scene Name"
-    
-    scene_name = ""
-    
-    # Try to extract from patterns with " - " or " – "
-    if " - " in title or " – " in title:
-        separator = " - " if " - " in title else " – "
-        parts = title.split(separator)
-        
-        # Last part is usually the scene name
-        if len(parts) > 1:
-            scene_name = parts[-1]
-    
-    # Clean scene name
-    scene_name = clean_text(scene_name)
-    return scene_name
+1. Copy `gay_tube_scraper.yml` and `gay_tube_scraper.py` to your StashApp scrapers directory
+   - Default location: `~/.stash/scrapers/`
+   - Windows location: `C:\Users\YourUsername\.stash\scrapers\`
+   - Or the custom location you've configured in StashApp settings
 
-def extract_studio_from_title(title):
-    """Extract studio name from title"""
-    # Common patterns:
-    # "Studio - Performer1 & Performer2 - Scene Name"
-    # "OnlyFans - Performer1 & Performer2"
-    
-    studio = ""
-    
-    # Try to extract from patterns with " - "
-    if " - " in title:
-        parts = title.split(" - ")
-        # First part is usually the studio
-        if len(parts) > 0:
-            studio = parts[0]
-    
-    # Clean studio name
-    studio = clean_text(studio)
-    return studio
+2. Make sure the Python script is executable:
+   ```
+   chmod +x gay_tube_scraper.py  # Linux/Mac only
+   ```
 
-def normalize_url(url):
-    """Normalize URL by removing query parameters and fragments"""
-    parsed = urllib.parse.urlparse(url)
-    return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+3. Ensure you have the required Python dependencies:
+   ```
+   pip install requests beautifulsoup4
+   ```
 
-# Site-specific scrapers
-def scrape_fxggxt(url):
-    """Scrape scene data from fxggxt.com"""
-    debug_print(f"Scraping fxggxt.com: {url}")
-    
-    try:
-        response = requests.get(url, headers=HEADERS)
-        response.raise_for_status()
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Try to extract JSON-LD data first (most reliable)
-        json_ld = None
-        for script in soup.find_all('script', type='application/ld+json'):
-            try:
-                data = json.loads(script.string)
-                if isinstance(data, dict) and '@graph' in data:
-                    json_ld = data
-                    break
-            except:
-                continue
-        
-        scene = {}
-        
-        # Extract from JSON-LD if available
-        if json_ld:
-            debug_print("Found JSON-LD data")
-            for item in json_ld.get('@graph', []):
-                if item.get('@type') == 'Article':
-                    scene['title'] = clean_text(item.get('headline', ''))
-                    
-                    # Extract studio from articleSection
-                    article_sections = item.get('articleSection', [])
-                    if article_sections and isinstance(article_sections, list) and len(article_sections) > 0:
-                        scene['studio'] = {'name': article_sections[0]}
-                    
-                    # Extract tags/categories
-                    if 'keywords' in item and isinstance(item['keywords'], list):
-                        scene['tags'] = [{'name': k} for k in item['keywords']]
-        
-        # Fallback to title parsing if JSON-LD doesn't have all we need
-        if not scene.get('title'):
-            title = soup.title.string if soup.title else ""
-            scene['title'] = extract_scene_name_from_title(title)
-        
-        # Extract performers from title
-        title = soup.title.string if soup.title else ""
-        
-        # For fxggxt.com, the title format is usually "Studio - Performer1 & Performer2 - Scene Name"
-        if "fxggxt.com" in url:
-            parts = title.split(" - ")
-            if len(parts) >= 2:
-                performer_part = parts[1]
-                if "&" in performer_part:
-                    performers = [p.strip() for p in performer_part.split("&")]
-                    scene['performers'] = [{'name': p} for p in performers if p]
-        else:
-            # For other sites
-            performers = extract_performers_from_title(title)
-            if performers:
-                scene['performers'] = [{'name': p} for p in performers]
-        
-        # Extract studio if not already set
-        if not scene.get('studio'):
-            studio = extract_studio_from_title(title)
-            if studio:
-                scene['studio'] = {'name': studio}
-        
-        # Set URL
-        scene['url'] = url
-        
-        return scene
-        
-    except Exception as e:
-        debug_print(f"Error scraping fxggxt.com: {str(e)}")
-        return {}
+4. Restart StashApp or reload scrapers from the UI (Scrape with... -> Reload scrapers)
 
-def scrape_likegay(url):
-    """Scrape scene data from likegay.net"""
-    debug_print(f"Scraping likegay.net: {url}")
-    
-    try:
-        response = requests.get(url, headers=HEADERS)
-        response.raise_for_status()
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        scene = {}
-        
-        # Extract from title
-        title = soup.title.string if soup.title else ""
-        
-        # Extract scene name
-        scene_name = extract_scene_name_from_title(title)
-        if scene_name:
-            scene['title'] = scene_name
-        
-        # Extract performers
-        performers = extract_performers_from_title(title)
-        if performers:
-            scene['performers'] = [{'name': p} for p in performers]
-        
-        # Try to extract studio from breadcrumbs
-        breadcrumbs = soup.select('.breadcrumb a')
-        if breadcrumbs and len(breadcrumbs) > 1:
-            studio_name = clean_text(breadcrumbs[1].text)
-            if studio_name:
-                scene['studio'] = {'name': studio_name}
-        
-        # Set URL
-        scene['url'] = url
-        
-        return scene
-        
-    except Exception as e:
-        debug_print(f"Error scraping likegay.net: {str(e)}")
-        return {}
+### Method 2: Installation via StashApp UI (v0.24.0+)
 
-def scrape_hutgay(url):
-    """Scrape scene data from hutgay.com"""
-    debug_print(f"Scraping hutgay.com: {url}")
-    
-    try:
-        response = requests.get(url, headers=HEADERS)
-        response.raise_for_status()
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        scene = {}
-        
-        # Extract from title
-        title = soup.title.string if soup.title else ""
-        
-        # Extract scene name
-        scene_name = extract_scene_name_from_title(title)
-        if scene_name:
-            scene['title'] = scene_name
-        
-        # Extract performers
-        performers = extract_performers_from_title(title)
-        if performers:
-            scene['performers'] = [{'name': p} for p in performers]
-        
-        # Try to extract studio from URL or content
-        # Most hutgay URLs don't include studio info, so we'll try to infer from content
-        h1_text = soup.h1.text if soup.h1 else ""
-        if " - " in h1_text:
-            studio_candidate = h1_text.split(" - ")[0].strip()
-            if studio_candidate and studio_candidate not in [p['name'] for p in scene.get('performers', [])]:
-                scene['studio'] = {'name': studio_candidate}
-        
-        # Set URL
-        scene['url'] = url
-        
-        return scene
-        
-    except Exception as e:
-        debug_print(f"Error scraping hutgay.com: {str(e)}")
-        return {}
+1. In StashApp, go to Settings > Metadata Providers
+2. Click "Add Source" and select "Custom"
+3. Enter a name (e.g., "Gay Tube Scraper")
+4. Upload the `gay_tube_scraper.yml` and `gay_tube_scraper.py` files
+5. Click "Save"
+6. Ensure you have Python installed and the required dependencies:
+   ```
+   pip install requests beautifulsoup4
+   ```
 
-def scrape_scene_by_url(url):
-    """Scrape scene data by URL"""
-    normalized_url = normalize_url(url)
-    
-    if "fxggxt.com" in normalized_url:
-        return scrape_fxggxt(normalized_url)
-    elif "likegay.net" in normalized_url:
-        return scrape_likegay(normalized_url)
-    elif "hutgay.com" in normalized_url:
-        return scrape_hutgay(normalized_url)
-    else:
-        debug_print(f"Unsupported URL: {normalized_url}")
-        return {}
+## Python Configuration
 
-def scrape_scene_by_fragment(fragment):
-    """Scrape scene data by fragment (filename)"""
-    debug_print(f"Scraping by fragment: {fragment}")
-    
-    # Extract potential scene data from filename
-    scene = {}
-    
-    # Try to extract scene name, performers, and studio from filename
-    filename = fragment.get('title', '')
-    
-    # Pattern 1: "Studio - Scene Name Actor1, Actor2"
-    pattern1 = re.compile(r'^(.+?)\s*-\s*(.+?)\s+(.+?)$')
-    
-    # Pattern 2: "STUDIO_-_SCENE_NAME_-_Actor1_-_Actor2_-_Actor3"
-    pattern2 = re.compile(r'^(.+?)_-_(.+?)_-_(.+?)$')
-    
-    # Try pattern 1
-    match = pattern1.match(filename)
-    if match:
-        studio, scene_name, performers_str = match.groups()
-        scene['studio'] = {'name': clean_text(studio)}
-        scene['title'] = clean_text(scene_name)
-        
-        # Extract performers
-        performers = []
-        if ',' in performers_str:
-            performers = [clean_text(p) for p in performers_str.split(',')]
-        else:
-            performers = [clean_text(performers_str)]
-        
-        scene['performers'] = [{'name': p} for p in performers if p]
-    
-    # Try pattern 2
-    if not scene and '_-_' in filename:
-        parts = filename.split('_-_')
-        if len(parts) >= 3:
-            studio = parts[0]
-            scene_name = parts[1]
-            performers = parts[2:]
-            
-            scene['studio'] = {'name': clean_text(studio)}
-            scene['title'] = clean_text(scene_name)
-            scene['performers'] = [{'name': clean_text(p)} for p in performers if clean_text(p)]
-    
-    # If still no match, try more general extraction
-    if not scene:
-        # Try to extract studio and scene name if format is "Studio - Scene Name"
-        if ' - ' in filename:
-            parts = filename.split(' - ')
-            if len(parts) >= 2:
-                scene['studio'] = {'name': clean_text(parts[0])}
-                scene['title'] = clean_text(parts[1])
-        
-        # Try to extract performers if they're in the filename
-        performers = []
-        # Look for common performer separator patterns
-        for pattern in [', ', ' & ', '_-_']:
-            if pattern in filename:
-                potential_performers = filename.split(pattern)
-                # Filter out likely non-performer parts (too short, contains numbers, etc.)
-                performers = [p for p in potential_performers if len(p) > 2 and not p.isdigit()]
-                if performers:
-                    break
-        
-        if performers:
-            scene['performers'] = [{'name': clean_text(p)} for p in performers if clean_text(p)]
-    
-    return scene
+Make sure you have Python 3.6+ installed on your system. If StashApp cannot find your Python installation, you can set the path in:
+- Settings > System > Application Paths > Python executable path
 
-# Main execution
-if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        debug_print("Error: Missing command argument")
-        sys.exit(1)
-    
-    command = sys.argv[1]
-    input_data = read_json_input()
-    
-    if command == "scrapeURL":
-        url = input_data.get('url', '')
-        if not url:
-            debug_print("Error: Missing URL in input")
-            sys.exit(1)
-        
-        result = scrape_scene_by_url(url)
-        print(json.dumps(result))
-    
-    elif command == "scrapeFragment":
-        result = scrape_scene_by_fragment(input_data)
-        print(json.dumps(result))
-    
-    else:
-        debug_print(f"Error: Unknown command '{command}'")
-        sys.exit(1)
+For Windows users, we recommend installing Python from python.org and not from the Windows Store.
+
+## Usage
+
+### URL Scraping
+1. In the scene edit page, paste a URL from one of the supported sites
+2. Click the "Scrape" button next to the URL field
+3. Select the fields you want to update
+4. Click "Scrape" to apply the changes
+
+### Filename Scraping
+1. In the scene edit page, click "Scrape With..."
+2. Select "GayTubeScraper" from the dropdown
+3. Select the fields you want to update
+4. Click "Scrape" to apply the changes
+
+## Supported Filename Formats
+
+The scraper attempts to extract information from various filename formats:
+
+- `Studio - Scene Name Actor1, Actor2`
+- `STUDIO_-_SCENE_NAME_-_Actor1_-_Actor2_-_Actor3`
+- `Studio - Scene Name`
+- Various other formats with performers separated by commas, ampersands, etc.
+
+## Supported URL Formats
+
+The scraper supports the following URL patterns:
+- fxggxt.com: `https://fxggxt.com/[studio]-[scene-name]/`
+- likegay.net: `https://likegay.net/[id]-[performers]-[scene-name].html`
+- hutgay.com: `https://ww1.hutgay.com/[performers]-[scene-name]/`
+
+## Extracted Metadata
+
+The scraper extracts the following metadata:
+- Scene title
+- Performer names
+- Studio name
+- Tags (when available, primarily from fxggxt.com)
+
+## Troubleshooting
+
+If you encounter issues:
+
+1. Check StashApp logs for error messages (Settings > Logs > Log Level Debug)
+2. Ensure the Python script has execute permissions
+3. Verify that all required Python dependencies are installed:
+   ```
+   pip install requests beautifulsoup4
+   ```
+4. Make sure the URL is from one of the supported sites
+5. Try different filename formats if filename scraping isn't working
+6. If you get "ModuleNotFoundError" errors, make sure you've installed the required Python packages
+7. If you get "Permission denied" errors, make sure the script is executable (Linux/Mac)
+8. If StashApp can't find Python, set the Python executable path in Settings > System > Application Paths
+
+## License
+
+This scraper is provided under the AGPL-3.0 license, consistent with StashApp's licensing.
